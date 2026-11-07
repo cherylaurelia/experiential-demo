@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* Palette and type from experientiallabs.ai (2026-11-06): Schibsted Grotesk, ink #171717,
+   accent #168a49 with ink #e9fff0, rule #dcdcdc, wash #fafafa, square corners; terminal green
+   #7ce3a1 on #0a0a0a from their dark sections. */
+:root {
+  --ink: #171717;
+  --muted: #5f5f5f;
+  --rule: #dcdcdc;
+  --wash: #fafafa;
+  --accent: #137a41; /* their #168a49, darkened for 4.5:1 on small text */
+  --accent-ink: #e9fff0;
+  --term: #0a0a0a;
+  --term-green: #7ce3a1;
+  --term-red: #ff9b85;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-wash: var(--wash);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-term: var(--term);
+  --color-term-green: var(--term-green);
+  --color-term-red: var(--term-red);
+  --font-sans: var(--font-schibsted), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+body {
+  background: #ffffff;
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+li code,
+p code,
+td code {
+  overflow-wrap: anywhere;
+}

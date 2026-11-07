@@ -1,0 +1,1 @@
+API Error: 400 The selected model route is not declared to support tools. Choose a different model alias, or ask the gateway operator to re-author this alias with --supports-tools if its model supports function calling. (param: tools)

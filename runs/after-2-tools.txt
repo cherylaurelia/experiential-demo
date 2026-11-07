@@ -1,0 +1,1 @@
+API Error: 400 The selected model route is not declared to stream tool-call arguments, which the gateway needs to serve tools on it. Choose a different model alias, or ask the gateway operator to re-author this alias with --supports-streaming-tool-arguments if its endpoint streams tool-call arguments. (param: tools)

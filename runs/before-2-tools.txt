@@ -1,0 +1,1 @@
+API Error: 400 The capability 'tools' is not supported by this gateway profile. Remove the field and resend the request. (param: tools)

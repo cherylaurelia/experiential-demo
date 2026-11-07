@@ -1,0 +1,146 @@
+From 9457682a789355d70fcece6cf5fb10daa6934717 Mon Sep 17 00:00:00 2001
+From: Cheryl Aurelia <135518448+cherylaurelia@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 19:57:52 -0500
+Subject: [PATCH] gateway: tool refusals name the alias flag that serves them;
+ recipes declare streamed tool arguments
+
+A coding agent cannot remove its tools, so the generic "Remove the field"
+wording left an operator with no way forward. An openai-compatible alias
+authored without --supports-tools, or with it but without
+--supports-streaming-tool-arguments (as the Fireworks recipe did), refused
+every Claude Code request with the same message. Each refusal now names its
+missing declaration, and the Fireworks and Modal recipes declare streamed
+tool arguments.
+
+Messages only: no capability default moves, and an alias declared without
+tools still fails closed before dispatch.
+---
+ docs/reference/openai-compatible-recipes.md   | 12 +++++--
+ .../tests/openai_compatible_recipes_test.py   |  1 +
+ exp/runtime/gateway/native_bridge_errors.py   | 11 +++++++
+ exp/runtime/gateway/native_bridge_test.py     | 31 ++++++++++++++++++-
+ 4 files changed, 51 insertions(+), 4 deletions(-)
+
+diff --git a/docs/reference/openai-compatible-recipes.md b/docs/reference/openai-compatible-recipes.md
+index 4cea8805..8895300d 100644
+--- a/docs/reference/openai-compatible-recipes.md
++++ b/docs/reference/openai-compatible-recipes.md
+@@ -34,8 +34,9 @@ exp config gateway provider add fireworks \
+ ```
+ 
+ Then bind one exact model as a direct alias. The capability flags are the template for a
+-current Fireworks chat model: most support tools and structured output, and none require
+-developer messages. Confirm the flags and the nano-USD prices per million tokens against
++current Fireworks chat model: most support tools (streamed as incremental arguments, which
++the gateway needs to serve tools on an openai-compatible route) and structured output, and none
++require developer messages. Confirm the flags and the nano-USD prices per million tokens against
+ the Fireworks model page before authoring, because the gateway treats both as frozen
+ authority for routing and accounting.
+ 
+@@ -47,7 +48,7 @@ separated by `.`, `_`, or `-` (for example `llama-v3p1-70b-instruct`).
+ exp config gateway alias create coding \
+   --deployment fireworks:accounts/fireworks/models/llama-v3p1-70b-instruct \
+   --exact-model llama-v3p1-70b-instruct \
+-  --supports-tools --supports-structured-output \
++  --supports-tools --supports-streaming-tool-arguments --supports-structured-output \
+   --input-price 900000 --output-price 900000 \
+   --pricing-source "https://fireworks.ai/pricing" \
+   --root ROOT --non-interactive --json
+@@ -88,6 +89,11 @@ exp config gateway alias create local-serve \
+   --root ROOT --non-interactive --json
+ ```
+ 
++If the served model was started with tool calling (for vLLM, `--enable-auto-tool-choice` and a
++tool-call parser), add `--supports-tools --supports-streaming-tool-arguments` to the alias;
++without them the gateway refuses every request that carries `tools`, which is every request
++from a coding agent.
++
+ `SERVED_MODEL_ID` is the model name the deployment reports in its own `GET /v1/models`;
+ self-hosted deployments usually bill through Modal compute rather than per token, so zero
+ token prices with an explicit `--pricing-source` keep the accounting honest. If the
+diff --git a/exp/cli/tests/openai_compatible_recipes_test.py b/exp/cli/tests/openai_compatible_recipes_test.py
+index b97c1ed2..28cf4a00 100644
+--- a/exp/cli/tests/openai_compatible_recipes_test.py
++++ b/exp/cli/tests/openai_compatible_recipes_test.py
+@@ -123,6 +123,7 @@ def test_fireworks_recipe_reaches_gateway_readiness_without_a_provider_call(
+         alias="coding",
+         capability_flags=(
+             "--supports-tools",
++            "--supports-streaming-tool-arguments",
+             "--supports-structured-output",
+             "--input-price",
+             "900000",
+diff --git a/exp/runtime/gateway/native_bridge_errors.py b/exp/runtime/gateway/native_bridge_errors.py
+index 809c7935..90d16dfb 100644
+--- a/exp/runtime/gateway/native_bridge_errors.py
++++ b/exp/runtime/gateway/native_bridge_errors.py
+@@ -142,6 +142,17 @@ _ATTACHMENT_CAPABILITY_MESSAGES = {
+         "and the gateway will not silently weaken it to 'auto'. Send tool_choice 'auto' "
+         "(the model may still call the tool) or choose a different model alias."
+     ),
++    "function_tools": (
++        "The selected model route is not declared to support tools. Choose a different "
++        "model alias, or ask the gateway operator to re-author this alias with "
++        "--supports-tools if its model supports function calling."
++    ),
++    "streaming_tool_arguments": (
++        "The selected model route is not declared to stream tool-call arguments, which "
++        "the gateway needs to serve tools on it. Choose a different model alias, or ask "
++        "the gateway operator to re-author this alias with "
++        "--supports-streaming-tool-arguments if its endpoint streams tool-call arguments."
++    ),
+ }
+ """Why an attachment was refused, since the field itself is the caller's message.
+ 
+diff --git a/exp/runtime/gateway/native_bridge_test.py b/exp/runtime/gateway/native_bridge_test.py
+index 6062fc22..4d67b56d 100644
+--- a/exp/runtime/gateway/native_bridge_test.py
++++ b/exp/runtime/gateway/native_bridge_test.py
+@@ -296,6 +296,35 @@ def test_forced_tool_choice_refusal_tells_the_caller_what_to_send_instead() -> N
+         assert "forced_tool_choice" not in error.detail.message
+ 
+ 
++@pytest.mark.parametrize(
++    ("capability", "flag"),
++    [
++        ("function_tools", "--supports-tools"),
++        ("streaming_tool_arguments", "--supports-streaming-tool-arguments"),
++    ],
++)
++def test_tool_refusal_names_the_operator_fix(capability: str, flag: str) -> None:
++    """A coding agent cannot drop its tools, so "remove the field" is no way out:
++    an alias authored without these declarations refused every Claude Code
++    request (2026-11-06). Each refusal names the declaration that is missing."""
++    for surface in (
++        GatewayApiSurface.CHAT_COMPLETIONS,
++        GatewayApiSurface.RESPONSES,
++        GatewayApiSurface.MESSAGES,
++    ):
++        error = _public_capability_error(
++            ProviderCapabilityError(capability=capability),
++            surface,
++            public_stream=False,
++            public_tools=True,
++        )
++        assert error.status_code == 400
++        assert error.detail.param == "tools"
++        assert error.detail.code == "unsupported_capability"
++        assert flag in error.detail.message
++        assert "Remove the field" not in error.detail.message
++
++
+ def test_public_capability_error_never_exposes_internal_labels() -> None:
+     """Internal route requirements fail against model without leaking their names."""
+     error = _public_capability_error(
+@@ -3535,7 +3564,7 @@ def test_non_streaming_tool_transport_failure_names_tools(tmp_path: Path) -> Non
+     error = json.loads(raised.value.public_error_json)
+     assert error["code"] == "unsupported_capability"
+     assert error["param"] == "tools"
+-    assert "Remove the field" in error["message"]
++    assert "--supports-streaming-tool-arguments" in error["message"]
+ 
+ 
+ def test_admit_preserves_parameter_path_for_an_over_limit_stop_list(tmp_path: Path) -> None:
+-- 
+2.50.1 (Apple Git-155)
+
